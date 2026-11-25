@@ -1,0 +1,25 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: operator-partition
+  namespace: default
+  labels:
+    experiment: operator-partition
+    workshop: cnpg-chaos
+spec:
+  action: partition
+  mode: all
+  duration: 120s
+  direction: both
+  selector:
+    namespaces:
+      - cnpg-system
+    labelSelectors:
+      app.kubernetes.io/name: cloudnative-pg
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - default
+      labelSelectors:
+        cnpg.io/cluster: pg-cluster

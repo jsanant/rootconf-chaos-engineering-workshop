@@ -1,0 +1,27 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: primary-network-partition
+  namespace: default
+  labels:
+    experiment: primary-network-partition
+    workshop: cnpg-chaos
+spec:
+  action: partition
+  mode: all
+  duration: 90s
+  direction: both
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      cnpg.io/cluster: pg-cluster
+      role: primary
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - default
+      labelSelectors:
+        cnpg.io/cluster: pg-cluster
+        role: replica
