@@ -18,6 +18,10 @@ export PATH := $(ROOT)/bin:$(PATH):$(HOME)/.krew/bin
 
 # --- platform (darwin|linux|windows × amd64|arm64) ---
 OS   := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+# Git Bash / MSYS report e.g. mingw64_nt-10.0-19045 or msys_nt-10.0-...
+ifneq ($(filter mingw% msys% cygwin%,$(OS)),)
+  OS := windows
+endif
 ARCH_RAW := $(shell uname -m)
 ifeq ($(ARCH_RAW),x86_64)
   ARCH := amd64
@@ -30,24 +34,32 @@ else ifeq ($(ARCH_RAW),arm64)
 else
   ARCH := $(ARCH_RAW)
 endif
+# Apple Silicon shell under Rosetta reports x86_64; kind nodes are still arm64,
+# so build/download for arm64 (otherwise loadgen dies with "exec format error").
+ifeq ($(OS)/$(ARCH),darwin/amd64)
+  ifeq ($(shell sysctl -in sysctl.proc_translated 2>/dev/null),1)
+    ARCH := arm64
+  endif
+endif
 PLATFORM := $(OS)/$(ARCH)
 
-# Windows tip: run make from Git Bash or WSL; Chocolatey installs are also fine on PATH.
-ifeq ($(OS),msys)
-  OS := windows
-endif
-ifeq ($(OS),mingw64_nt-10.0)
-  OS := windows
-endif
+# Windows tip: run make from Git Bash or WSL.
 
 # --- tunables ---
 CLUSTER_NAME           ?= cnpg-chaos
 KIND_NODE_IMAGE        ?= kindest/node:v1.37.0
 KIND_CONFIG            ?= $(ROOT)/kind-config.yaml
 OFFLINE                ?= 0
+FORCE                  ?= 0
 SKIP_MONITORING        ?= 0
 LOADGEN_IMAGE          ?= cnpg-loadgen:local
 LOADGEN_INTERVAL_MS    ?= 2000
+
+KIND_VERSION           ?= v0.33.0
+KUBECTL_VERSION        ?= v1.37.2
+HELM_VERSION           ?= v4.3.1
+JQ_VERSION             ?= 1.8.1
+KIND_MIN_VERSION       ?= 0.33.0
 
 CNPG_CHART_VERSION         ?= 0.29.2
 CHAOS_MESH_CHART_VERSION   ?= 2.8.8
@@ -70,7 +82,7 @@ DOCKER         ?= docker
 .PHONY: help platform doctor all setup cache cache-images cache-charts load-cache \
 	kind monitoring cnpg-operator cnpg-grafana-dashboard cnpg-cluster cnpg-plugin chaos-mesh \
 	loadgen loadgen-build loadgen-deploy loadgen-logs status cleanup teardown \
-	install-tools wait-nodes wait-cnpg patch-chaos-daemon
+	install-tools check-kind wait-nodes wait-cnpg patch-chaos-daemon
 
 help:
 	@echo "Platform: $(PLATFORM)   OFFLINE=$(OFFLINE)   SKIP_MONITORING=$(SKIP_MONITORING)"
@@ -104,20 +116,37 @@ help:
 	@echo "Tools:"
 	@echo "  make platform            Print detected OS/ARCH"
 	@echo "  make doctor              Check docker/kind/kubectl/helm/go"
-	@echo "  make install-tools       Download kind+kubectl into ./bin for $(PLATFORM)"
+	@echo "  make install-tools       Install missing/too-old kind, kubectl, helm, jq, krew + cnpg plugin into ./bin (FORCE=1: ignore system copies)"
 
 platform:
 	@bash $(ROOT)/scripts/platform.sh
 
 doctor:
-	@echo "Platform: $(PLATFORM)"
-	@$(DOCKER) version --format 'docker: {{.Server.Version}}' 2>/dev/null || echo "docker: MISSING"
-	@$(KIND) version 2>/dev/null || echo "kind: MISSING (make install-tools)"
-	@$(KUBECTL) version --client --output=yaml 2>/dev/null | head -3 || echo "kubectl: MISSING"
-	@$(HELM) version --short 2>/dev/null || echo "helm: MISSING"
-	@command -v go >/dev/null && go version || echo "go: optional (image build uses golang container)"
-	@command -v jq >/dev/null && jq --version || echo "jq: recommended"
+	@echo "Platform: $(PLATFORM)   make $(MAKE_VERSION)"
+	@if [[ "$$(printf '%s\n' 3.82 "$(MAKE_VERSION)" | sort -V | head -1)" != 3.82 ]]; then \
+	  echo "WARN: make $(MAKE_VERSION) ignores .SHELLFLAGS (no pipefail). On macOS: brew install make && gmake ..."; \
+	fi
+	@$(DOCKER) info >/dev/null 2>&1 || { echo "ERROR: docker daemon not reachable — start Docker/Rancher Desktop" >&2; exit 1; }
+	@$(DOCKER) version --format 'docker: {{.Server.Version}} ({{.Server.Os}}/{{.Server.Arch}})'
+	@missing=""; for t in $(KIND) $(KUBECTL) $(HELM) jq; do \
+	  command -v $$t >/dev/null || missing="$$missing $$t"; \
+	done; \
+	if [[ -n "$$missing" ]]; then echo "ERROR: missing:$$missing — run: make install-tools" >&2; exit 1; fi
+	@$(MAKE) --no-print-directory check-kind
+	@$(KUBECTL) version --client | head -1
+	@$(HELM) version --short
+	@jq --version
+	@$(KUBECTL) krew version >/dev/null 2>&1 && echo "krew: ok" || echo "krew: missing (cnpg-plugin step will be skipped)"
+	@command -v go >/dev/null && go version || echo "go: optional (set LOADGEN_DOCKER_BUILD=1 to build loadgen in a container)"
 	@echo "OFFLINE=$(OFFLINE) IMAGE_CACHE=$(IMAGE_CACHE) CHART_CACHE=$(CHART_CACHE)"
+
+# An old kind generates kubeadm v1beta3, which kindest/node v1.37 rejects.
+check-kind:
+	@v=$$($(KIND) version | sed -E 's/^kind v([0-9.]+).*/\1/'); \
+	if [[ "$$(printf '%s\n' "$(KIND_MIN_VERSION)" "$$v" | sort -V | head -1)" != "$(KIND_MIN_VERSION)" ]]; then \
+	  echo "ERROR: kind v$$v ($$(command -v $(KIND))) is too old for $(KIND_NODE_IMAGE); need >= v$(KIND_MIN_VERSION). Run: make install-tools" >&2; exit 1; \
+	fi; \
+	echo "kind v$$v OK ($$(command -v $(KIND)))"
 
 # ---------------------------------------------------------------------------
 # Offline cache
@@ -153,14 +182,14 @@ load-cache:
 # ---------------------------------------------------------------------------
 
 all: setup
-setup: doctor kind monitoring cnpg-operator cnpg-cluster cnpg-plugin chaos-mesh loadgen status
+setup: install-tools doctor kind monitoring cnpg-operator cnpg-cluster cnpg-plugin chaos-mesh loadgen status
 	@echo "Setup complete."
 
 # ---------------------------------------------------------------------------
 # Kind
 # ---------------------------------------------------------------------------
 
-kind:
+kind: check-kind
 	@if $(KIND) get clusters 2>/dev/null | grep -qx $(CLUSTER_NAME); then \
 		echo "kind cluster $(CLUSTER_NAME) already exists"; \
 	else \
@@ -174,13 +203,16 @@ kind:
 	@$(MAKE) wait-nodes
 	@if [[ "$(OFFLINE)" == "1" ]]; then $(MAKE) load-cache; fi
 
+# On the 3rd retry, bump inotify limits and restart kubelet on each node:
+# kind sometimes needs this on busy hosts. (Keep comments OUT of the
+# backslash-continued shell block below: make 3.81 on macOS joins it into
+# one line, so a '#' there comments out the rest of the loop.)
 wait-nodes:
 	@echo "Waiting for nodes Ready..."
 	@for i in 1 2 3 4 5 6 7 8 9 10 11 12; do \
 	  ready=$$($(KUBECTL) get nodes --no-headers 2>/dev/null | awk '$$2=="Ready"{c++} END{print c+0}'); \
 	  echo "  ready_nodes=$$ready"; \
 	  if [[ "$$ready" -ge 4 ]]; then exit 0; fi; \
-	  # kind sometimes needs inotify bump on busy hosts \
 	  if [[ "$$i" == "3" ]]; then \
 	    for n in $$($(KIND) get nodes --name $(CLUSTER_NAME)); do \
 	      $(DOCKER) exec "$$n" sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=524288 >/dev/null 2>&1 || true; \
@@ -208,7 +240,7 @@ else
 	    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
 	    --set grafana.sidecar.dashboards.enabled=true \
 	    --set grafana.sidecar.dashboards.label=grafana_dashboard \
-	    --set grafana.sidecar.dashboards.labelValue=1 \
+	    --set-string grafana.sidecar.dashboards.labelValue=1 \
 	    --set grafana.sidecar.dashboards.searchNamespace=ALL \
 	    --wait=false --timeout $(HELM_TIMEOUT); \
 	else \
@@ -221,7 +253,7 @@ else
 	    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
 	    --set grafana.sidecar.dashboards.enabled=true \
 	    --set grafana.sidecar.dashboards.label=grafana_dashboard \
-	    --set grafana.sidecar.dashboards.labelValue=1 \
+	    --set-string grafana.sidecar.dashboards.labelValue=1 \
 	    --set grafana.sidecar.dashboards.searchNamespace=ALL \
 	    --wait=false --timeout $(HELM_TIMEOUT); \
 	fi
@@ -356,11 +388,16 @@ ifeq ($(LOADGEN_DOCKER_BUILD),1)
 else
 	@command -v go >/dev/null || { echo "Go required for loadgen-build (or set LOADGEN_DOCKER_BUILD=1)"; exit 1; }
 	@echo "Building loadgen for linux/$(ARCH) with local Go..."
-	@cd $(ROOT)/loadgen && \
-	  GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0 \
-	  go build -trimpath -ldflags='-s -w' -o loadgen .
-	@$(DOCKER) build -f $(ROOT)/loadgen/Dockerfile -t $(LOADGEN_IMAGE) $(ROOT)/loadgen
-	@rm -f $(ROOT)/loadgen/loadgen
+	@# Build into a throwaway dir and use it as the docker build context: the
+	@# context then holds only the binary, so loadgen/.dockerignore (which keeps
+	@# the binary out of Dockerfile.golang builds) can't exclude it, and no stray
+	@# binary is left in the repo if the build fails.
+	@ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \
+	cd $(ROOT)/loadgen && \
+	GOOS=linux GOARCH=$(ARCH) CGO_ENABLED=0 \
+	  go build -trimpath -ldflags='-s -w' -o "$$ctx/loadgen" . && \
+	cp $(ROOT)/loadgen/Dockerfile "$$ctx/Dockerfile" && \
+	$(DOCKER) build -t $(LOADGEN_IMAGE) "$$ctx"
 endif
 	@$(KIND) load docker-image $(LOADGEN_IMAGE) --name $(CLUSTER_NAME)
 	@$(DOCKER) save -o $(IMAGE_CACHE)/cnpg-loadgen__local.tar $(LOADGEN_IMAGE)
@@ -417,26 +454,11 @@ teardown:
 	@echo "Teardown done."
 
 # ---------------------------------------------------------------------------
-# Optional: download kind + kubectl into ./bin for this platform
+# Tools: kind, kubectl, helm, jq, krew + kubectl-cnpg into ./bin (idempotent)
 # ---------------------------------------------------------------------------
 
-KIND_VERSION    ?= v0.33.0
-KUBECTL_VERSION ?= v1.37.2
-
 install-tools:
-	@mkdir -p $(BIN_DIR)
-	@echo "Installing tools for $(PLATFORM) into $(BIN_DIR)"
-ifeq ($(OS),darwin)
-	@echo "On macOS, prefer: brew install kind kubectl helm krew jq"
-endif
-	@echo "Downloading kind $(KIND_VERSION)..."
-	@curl -fsSL -o $(BIN_DIR)/kind \
-	  "https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(OS)-$(ARCH)"
-	@chmod +x $(BIN_DIR)/kind
-	@echo "Downloading kubectl $(KUBECTL_VERSION)..."
-	@curl -fsSL -o $(BIN_DIR)/kubectl \
-	  "https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(OS)/$(ARCH)/kubectl"
-	@chmod +x $(BIN_DIR)/kubectl
-	@$(BIN_DIR)/kind version; $(BIN_DIR)/kubectl version --client
-	@echo "Add to PATH: export PATH=$(BIN_DIR):$$PATH"
-	@echo "Helm: install via https://helm.sh/docs/intro/install/ (brew/choco/script)"
+	@BIN_DIR=$(BIN_DIR) OS=$(OS) ARCH=$(ARCH) \
+	  KIND_VERSION=$(KIND_VERSION) KUBECTL_VERSION=$(KUBECTL_VERSION) \
+	  HELM_VERSION=$(HELM_VERSION) JQ_VERSION=$(JQ_VERSION) FORCE=$(FORCE) \
+	  bash $(ROOT)/scripts/install-tools.sh
