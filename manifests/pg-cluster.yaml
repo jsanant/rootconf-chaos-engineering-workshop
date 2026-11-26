@@ -5,6 +5,9 @@ metadata:
   namespace: default
 spec:
   instances: 3
+  # Synchronous replication: primary waits for both standbys (quorum of 2).
+  minSyncReplicas: 2
+  maxSyncReplicas: 2
   storage:
     size: 1Gi
   monitoring:

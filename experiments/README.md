@@ -4,7 +4,7 @@ Chaos Mesh experiments against a 3-instance CloudNativePG cluster (`pg-cluster`:
 
 ## Before you start
 
-Finish setup ([Setup.md](../Setup.md) or `make all` from the repo root) so you have:
+Finish setup ([Setup.md](../Setup.md) or `make install` from the repo root) so you have:
 
 - kind cluster `cnpg-chaos` (1 control-plane + 3 workers)
 - kube-prometheus-stack in `monitoring` (unless you skipped it)
@@ -70,11 +70,10 @@ kubectl get podchaos,networkchaos
 kubectl describe podchaos <name>
 kubectl describe networkchaos <name>
 
-# Grafana (admin / prom-operator) — if monitoring is installed
-kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
-
-# Chaos Mesh dashboard
-kubectl -n chaos-mesh port-forward svc/chaos-dashboard 2333:2333
+# UIs (published by kind — no port-forward)
+# Grafana: http://localhost:3000  (admin / prom-operator)
+# Chaos Mesh: http://localhost:2333
+make ui
 ```
 
 ## Ideas for later (not packaged here)

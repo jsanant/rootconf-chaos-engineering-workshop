@@ -4,7 +4,8 @@ Populate while you have a good network, then use `OFFLINE=1` on constrained link
 
 ```bash
 make cache                 # images → artifacts/images/*.tar + helm charts → artifacts/charts/*.tgz
-make all OFFLINE=1         # kind/helm installs from cache; loadgen still builds locally with Go
+make load                  # docker load (+ kind load if cluster exists)
+make install OFFLINE=1     # kind/helm installs from cache; loadgen still builds locally with Go
 ```
 
 | Path | Contents |

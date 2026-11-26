@@ -60,7 +60,10 @@ mkdir -p "$BIN_DIR"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 export PATH="$BIN_DIR:${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
-echo "Checking tools for $OS/$ARCH (missing ones go into $BIN_DIR)"
+# Quiet by default; set TOOLS_VERBOSE=1 for per-tool lines.
+VERBOSE="${TOOLS_VERBOSE:-0}"
+log() { [[ "$VERBOSE" == 1 ]] && echo "$*" || true; }
+echo "Checking tools..."
 
 # --- helpers --------------------------------------------------------------
 sha256() {
@@ -88,12 +91,12 @@ usable() {
   local name="$1" min="$2"; shift 2
   [[ "$FORCE" == 1 ]] && return 1
   local path; path="$(command -v "$name$EXE" 2>/dev/null || command -v "$name" 2>/dev/null)" || {
-    echo "$name: not found"; return 1; }
+    log "$name: not found"; return 1; }
   local v; v="$("$path" "$@" 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
   if [[ -n "$v" ]] && ver_ge "$v" "$min"; then
-    echo "$name $v: ok ($path)"; return 0
+    log "$name $v: ok ($path)"; return 0
   fi
-  echo "$name ${v:-?} at $path is older than $min — installing pinned version into $BIN_DIR"
+  echo "$name ${v:-?} is older than $min — installing into $BIN_DIR"
   return 1
 }
 
@@ -149,7 +152,7 @@ if [[ "$OS" == windows ]]; then
   echo "krew: skipped on Windows (choco install kubernetes-krew, or use WSL)"
 else
   if [[ "$FORCE" != 1 ]] && kubectl krew version >/dev/null 2>&1; then
-    echo "krew: ok ($(command -v kubectl-krew || echo "$HOME/.krew/bin/kubectl-krew"))"
+    log "krew: ok"
   else
     echo "Installing krew..."
     krew="krew-${OS}_${ARCH}"
@@ -161,19 +164,12 @@ else
     "$TMP/$krew" install krew >/dev/null
   fi
   if kubectl cnpg version >/dev/null 2>&1; then
-    echo "kubectl-cnpg: ok"
+    log "kubectl-cnpg: ok"
   else
     echo "Installing kubectl cnpg plugin..."
     kubectl krew update >/dev/null 2>&1 || true
-    kubectl krew install cnpg
+    kubectl krew install cnpg >/dev/null
   fi
 fi
 
-echo ""
-echo "Using:"
-for t in kind kubectl helm jq; do printf '  %-8s %s\n' "$t" "$(command -v "$t$EXE" || command -v "$t")"; done
-if [[ -n "$(ls -A "$BIN_DIR" 2>/dev/null)" ]]; then
-  echo ""
-  echo "make targets already use $BIN_DIR. For your own shell, add:"
-  echo "  export PATH=\"$BIN_DIR:\${KREW_ROOT:-\$HOME/.krew}/bin:\$PATH\""
-fi
+echo "  tools: ready"
