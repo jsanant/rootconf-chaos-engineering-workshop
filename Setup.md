@@ -128,7 +128,7 @@ helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
   --set grafana.sidecar.dashboards.searchNamespace=ALL
 ```
 
-> Open Grafana at http://localhost:3000 (login `admin` / `prom-operator`).
+> Open Grafana at http://localhost:3000 (login `admin` / `admin`).
 > Kind maps host ports via `extraPortMappings` — no `kubectl port-forward` needed.
 
 ## 3. CNPG operator
@@ -157,14 +157,14 @@ kubectl -n monitoring get configmap cnpg-grafana-dashboard
 
 ## 4. CNPG cluster
 
-> A 3-instance Postgres cluster (1 primary + 2 sync replicas). Synchronous
-> replication (`minSyncReplicas` / `maxSyncReplicas` = 2) so the primary waits
-> for both standbys. `enablePodMonitor: true` wires metrics into Prometheus.
+> A 3-instance Postgres cluster with sync replication and separate data + WAL
+> volumes. Metrics are scraped via `manifests/podmonitor.yaml`.
 
 ```bash
 kubectl apply -f manifests/pg-cluster.yaml
+kubectl apply -f manifests/podmonitor.yaml
 
-kubectl wait --for=condition=Ready cluster/pg-cluster --timeout=300s
+kubectl wait --for=condition=Ready cluster/pg-cluster --timeout=600s
 ```
 
 ## 5. CNPG plugin
@@ -195,4 +195,4 @@ helm install chaos-mesh chaos-mesh/chaos-mesh \
   --set dashboard.create=true
 ```
 
-> Open Chaos Mesh at http://localhost:2333 (same kind host port mapping as Grafana).
+> Open Chaos Mesh at http://localhost:2333.

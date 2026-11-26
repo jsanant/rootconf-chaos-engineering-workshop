@@ -71,7 +71,7 @@ kubectl describe podchaos <name>
 kubectl describe networkchaos <name>
 
 # UIs (published by kind — no port-forward)
-# Grafana: http://localhost:3000  (admin / prom-operator)
+# Grafana: http://localhost:3000  (admin / admin)
 # Chaos Mesh: http://localhost:2333
 make ui
 ```
