@@ -1,0 +1,11 @@
+# CloudNativePG operator Helm values for this workshop.
+# Provisions the official CNPG Grafana dashboard ConfigMap into the
+# kube-prometheus-stack namespace so Grafana's sidecar auto-loads it
+# (label grafana_dashboard=1, searchNamespace=ALL by default).
+monitoring:
+  grafanaDashboard:
+    create: true
+    namespace: monitoring
+    configMapName: cnpg-grafana-dashboard
+    labels:
+      grafana_dashboard: "1"

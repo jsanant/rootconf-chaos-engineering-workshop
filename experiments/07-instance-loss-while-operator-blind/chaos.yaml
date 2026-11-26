@@ -1,0 +1,57 @@
+# Instance loss while CNPG cannot heal (control path blind).
+#
+# Ideal story from 05/06: a Postgres pod dies while kube-apiserver/etcd are down,
+# so the operator cannot recreate it. On kind, keeping static apiserver/etcd pods
+# down long enough via PodChaos is unreliable (kubelet recreates them in seconds,
+# and the operator wins the race to heal).
+#
+# This experiment uses the equivalent control-path failure that Chaos Mesh can
+# hold for a full duration on kind:
+#   1) NetworkChaos — partition the CNPG operator from all pg-cluster pods
+#   2) PodChaos     — kill one replica
+# kubectl stays up so you can watch the missing instance fail to return until
+# the partition ends.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: operator-blind-during-instance-loss
+  namespace: default
+  labels:
+    experiment: instance-loss-while-operator-blind
+    workshop: cnpg-chaos
+spec:
+  action: partition
+  mode: all
+  duration: 90s
+  direction: both
+  selector:
+    namespaces:
+      - cnpg-system
+    labelSelectors:
+      app.kubernetes.io/name: cloudnative-pg
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - default
+      labelSelectors:
+        cnpg.io/cluster: pg-cluster
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: replica-kill-while-operator-blind
+  namespace: default
+  labels:
+    experiment: instance-loss-while-operator-blind
+    workshop: cnpg-chaos
+spec:
+  action: pod-kill
+  mode: one
+  duration: 30s
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      cnpg.io/cluster: pg-cluster
+      role: replica

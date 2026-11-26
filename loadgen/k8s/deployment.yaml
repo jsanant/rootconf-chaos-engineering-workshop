@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cnpg-loadgen
+  namespace: default
+  labels:
+    app: cnpg-loadgen
+    workshop: cnpg-chaos
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cnpg-loadgen
+  namespace: default
+  labels:
+    app: cnpg-loadgen
+    workshop: cnpg-chaos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cnpg-loadgen
+  template:
+    metadata:
+      labels:
+        app: cnpg-loadgen
+        workshop: cnpg-chaos
+    spec:
+      serviceAccountName: cnpg-loadgen
+      containers:
+        - name: loadgen
+          image: cnpg-loadgen:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGHOST
+              value: pg-cluster-rw
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: app
+            - name: PGSSLMODE
+              value: require
+            - name: INTERVAL_MS
+              value: "2000"
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: pg-cluster-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg-cluster-app
+                  key: password
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cnpg-loadgen
+  namespace: default
+  labels:
+    app: cnpg-loadgen
+spec:
+  selector:
+    app: cnpg-loadgen
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

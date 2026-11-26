@@ -29,6 +29,14 @@ go.work.sum
 # env file
 .env
 
+# Local tool + offline caches (machine-specific)
+/bin/
+/artifacts/images/
+/artifacts/charts/
+*.tar
+/loadgen/loadgen
+
+
 # Editor/IDE
 # .idea/
 # .vscode/

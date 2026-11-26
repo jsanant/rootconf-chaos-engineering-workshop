@@ -1,0 +1,15 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-cluster
+  namespace: default
+spec:
+  instances: 3
+  # Synchronous replication: primary waits for sync standby quorum.
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
+  # Separate PVCs for PGDATA and WAL (recommended for IO isolation).
+  storage:
+    size: 1Gi
+  walStorage:
+    size: 1Gi
