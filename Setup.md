@@ -1,6 +1,7 @@
 # Workshop Setup — Install Steps
 
 > **Preferred:** from the repo root, use the Makefile:
+>
 > ```bash
 > make check          # verify docker + CLIs
 > make cache          # optional — while network is good
@@ -19,12 +20,14 @@
 
 Install and start one of these (make sure it's running before step 1):
 
-- Docker Desktop — https://www.docker.com/products/docker-desktop/
+- Docker Desktop — [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
   - Direct downloads: [macOS](https://docs.docker.com/desktop/setup/install/mac-install/) · [Windows](https://docs.docker.com/desktop/setup/install/windows-install/) · [Linux](https://docs.docker.com/desktop/setup/install/linux/)
-- Rancher Desktop (alternative) — https://rancherdesktop.io/
+- Rancher Desktop (alternative) — [https://rancherdesktop.io/](https://rancherdesktop.io/)
 
-> Give it at least **4 CPUs and 8 GB RAM** (Settings → Resources). The chaos +
+> Give it at least **4 CPUs and 8 GB RAM** (Settings → Resources). The chaos +  
 > monitoring + Postgres pods need the headroom.
+
+
 
 ### CLI tools
 
@@ -37,15 +40,19 @@ Install `kind`, `kubectl`, `helm`, `krew`, and `jq`. Pick your OS.
 brew install kind kubectl helm krew jq
 ```
 
+
+
 ### Windows
 
 ```powershell
 # Requires Chocolatey (run PowerShell as Administrator): https://chocolatey.org/install
-choco install kind kubernetes-cli kubernetes-helm kubernetes-krew jq -y
+choco install kind kubernetes-cli kubernetes-helm krew jq -y
 ```
 
 > Tip: Use the **WSL 2** backend in Docker/Rancher Desktop. You can also run the
 > macOS/Linux steps from inside a WSL 2 Ubuntu shell if you prefer.
+
+
 
 ### Linux
 
@@ -76,6 +83,7 @@ sudo apt-get update && sudo apt-get install -y jq
 ```
 
 > `krew` needs `$HOME/.krew/bin` on your `PATH`. Add this to your shell profile and restart the shell:
+>
 > ```bash
 > export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
 > ```
@@ -87,6 +95,8 @@ kind version && kubectl version --client && helm version && kubectl krew version
 ```
 
 ---
+
+
 
 ## 1. Kind cluster (3 worker nodes)
 
@@ -107,6 +117,19 @@ EOF
 kind create cluster --name cnpg-chaos --image kindest/node:v1.37.0 --config kind-config.yaml
 kubectl get nodes   # expect 4 nodes: 1 control-plane + 3 workers
 ```
+#### Windows
+```powershell
+@'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker
+'@ | Set-Content -Path kind-config.yaml -Encoding utf8
+```
+
 
 ## 2. Grafana + Prometheus
 
@@ -127,9 +150,28 @@ helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
   --set grafana.sidecar.dashboards.labelValue=1 \
   --set grafana.sidecar.dashboards.searchNamespace=ALL
 ```
+#### Windows
+```powershell
+helm upgrade --install monitoring prometheus-community/kube-prometheus-stack `
+  --namespace monitoring --create-namespace `
+  --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false `
+  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false `
+  --set grafana.sidecar.dashboards.enabled=true `
+  --set grafana.sidecar.dashboards.label=grafana_dashboard `
+  --set-string grafana.sidecar.dashboards.labelValue=1 `
+  --set grafana.sidecar.dashboards.searchNamespace=ALL
 
-> Open Grafana at http://localhost:3000 (login `admin` / `admin`).
+kubectl --namespace monitoring port-forward svc/monitoring-grafana 3000:80
+
+$b64 = kubectl --namespace monitoring get secret monitoring-grafana -o jsonpath="{.data.admin-password}"
+[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
+```
+
+
+> Open Grafana at [http://localhost:3000](http://localhost:3000) (login `admin` / `admin`).
 > Kind maps host ports via `extraPortMappings` — no `kubectl port-forward` needed.
+
+
 
 ## 3. CNPG operator
 
@@ -150,10 +192,27 @@ kubectl -n cnpg-system rollout status deploy/cnpg-cloudnative-pg
 # Official CNPG Grafana dashboard (ConfigMap in monitoring; Grafana sidecar auto-loads it)
 kubectl -n monitoring get configmap cnpg-grafana-dashboard
 ```
+#### Windows
+```powershell
+helm repo add cnpg https://cloudnative-pg.github.io/charts
+helm repo update
+
+helm upgrade --install cnpg cnpg/cloudnative-pg `
+  --namespace cnpg-system --create-namespace `
+  --version 0.29.2 `
+  -f manifests/cnpg-operator-values.yaml
+  
+kubectl -n cnpg-system rollout status deploy/cnpg-cloudnative-pg
+
+# Official CNPG Grafana dashboard (ConfigMap in monitoring; Grafana sidecar auto-loads it)
+kubectl -n monitoring get configmap cnpg-grafana-dashboard
+```
 
 > Grafana login `admin` / `prom-operator`. Open **Dashboards → CloudNativePG** after
 > port-forwarding Grafana (step 2). The dashboard ConfigMap is labeled
 > `grafana_dashboard=1` so the kube-prometheus-stack sidecar imports it.
+
+
 
 ## 4. CNPG cluster
 
@@ -167,6 +226,8 @@ kubectl apply -f manifests/podmonitor.yaml
 kubectl wait --for=condition=Ready cluster/pg-cluster --timeout=600s
 ```
 
+
+
 ## 5. CNPG plugin
 
 > Adds the `kubectl cnpg` subcommand to inspect and manage the cluster.
@@ -175,6 +236,8 @@ kubectl wait --for=condition=Ready cluster/pg-cluster --timeout=600s
 kubectl krew install cnpg
 kubectl cnpg status pg-cluster
 ```
+
+
 
 ## 6. Chaos Mesh
 
@@ -193,6 +256,27 @@ helm install chaos-mesh chaos-mesh/chaos-mesh \
   --set chaosDaemon.runtime=containerd \
   --set chaosDaemon.socketPath=/run/containerd/containerd.sock \
   --set dashboard.create=true
-```
+  --set dashboard.securityMode=false
 
-> Open Chaos Mesh at http://localhost:2333.
+kubectl --namespace chaos-mesh port-forward svc/chaos-dashboard 2333:2333
+```
+#### Windows
+```powershell
+helm install chaos-mesh chaos-mesh/chaos-mesh `
+  --namespace chaos-mesh `
+  --create-namespace `
+  --version 2.8.8 `
+  --set chaosDaemon.runtime=containerd `
+  --set chaosDaemon.socketPath=/run/containerd/containerd.sock `
+  --set dashboard.create=true `
+  --set dashboard.securityMode=false
+
+kubectl --namespace chaos-mesh port-forward svc/chaos-dashboard 2333:2333
+
+If chaos-controller-manager pods fail to come up, check the error logs to find the root cause. Then try the fix below:
+
+wsl -d rancher-desktop sysctl -w fs.inotify.max_user_instances=1024
+wsl -d rancher-desktop sysctl -w fs.inotify.max_user_watches=524288
+```
+> Open Chaos Mesh at [http://localhost:2333](http://localhost:2333).
+
