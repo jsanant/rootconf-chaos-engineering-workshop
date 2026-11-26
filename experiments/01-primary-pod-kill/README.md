@@ -16,7 +16,7 @@ You force-kill the Postgres **primary** pod and watch CloudNativePG recover:
 
 ## Before you start
 
-Cluster and Chaos Mesh should already be up (`make all` or [Setup.md](../../Setup.md)).
+Cluster and Chaos Mesh should already be up (`make install` or [Setup.md](../../Setup.md)).
 
 ```bash
 kubectl cnpg status pg-cluster

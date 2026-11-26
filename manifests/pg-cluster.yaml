@@ -5,7 +5,11 @@ metadata:
   namespace: default
 spec:
   instances: 3
+  # Synchronous replication: primary waits for sync standby quorum.
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
+  # Separate PVCs for PGDATA and WAL (recommended for IO isolation).
   storage:
     size: 1Gi
-  monitoring:
-    enablePodMonitor: true
+  walStorage:
+    size: 1Gi

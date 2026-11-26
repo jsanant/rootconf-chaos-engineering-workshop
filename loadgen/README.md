@@ -15,8 +15,6 @@ make loadgen
 Follow live output:
 
 ```bash
-make loadgen-logs
-# or:
 kubectl -n default logs -l app=cnpg-loadgen -f --tail=50
 ```
 

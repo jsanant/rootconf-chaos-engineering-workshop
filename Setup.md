@@ -1,13 +1,12 @@
 # Workshop Setup — Install Steps
 
-> **Preferred:** from the repo root, use the Makefile (platform-aware, supports offline cache):
+> **Preferred:** from the repo root, use the Makefile:
 > ```bash
-> make doctor
+> make check          # verify docker + CLIs
 > make cache          # optional — while network is good
-> make all            # or: make all OFFLINE=1 SKIP_MONITORING=1
-> make loadgen-logs   # R/W traffic against CNPG
+> make install        # or: make install OFFLINE=1
+> make ui             # Grafana + Chaos Mesh dashboards
 > ```
-> Individual steps: `make kind`, `make cnpg-operator`, `make cnpg-cluster`, `make chaos-mesh`, `make loadgen`, …
 >
 > Manual commands below remain valid if you prefer copy-paste setup.
 
@@ -129,11 +128,8 @@ helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
   --set grafana.sidecar.dashboards.searchNamespace=ALL
 ```
 
-> Open Grafana (default login `admin` / `prom-operator`):
-> ```bash
-> kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
-> # browse http://localhost:3000
-> ```
+> Open Grafana at http://localhost:3000 (login `admin` / `admin`).
+> Kind maps host ports via `extraPortMappings` — no `kubectl port-forward` needed.
 
 ## 3. CNPG operator
 
@@ -161,24 +157,14 @@ kubectl -n monitoring get configmap cnpg-grafana-dashboard
 
 ## 4. CNPG cluster
 
-> A 3-instance Postgres cluster (1 primary + 2 replicas). `enablePodMonitor: true`
-> wires its metrics into Prometheus from step 2.
+> A 3-instance Postgres cluster with sync replication and separate data + WAL
+> volumes. Metrics are scraped via `manifests/podmonitor.yaml`.
 
 ```bash
-kubectl apply -f - <<'EOF'
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: pg-cluster
-spec:
-  instances: 3
-  storage:
-    size: 1Gi
-  monitoring:
-    enablePodMonitor: true
-EOF
+kubectl apply -f manifests/pg-cluster.yaml
+kubectl apply -f manifests/podmonitor.yaml
 
-kubectl wait --for=condition=Ready cluster/pg-cluster --timeout=300s
+kubectl wait --for=condition=Ready cluster/pg-cluster --timeout=600s
 ```
 
 ## 5. CNPG plugin
@@ -209,8 +195,4 @@ helm install chaos-mesh chaos-mesh/chaos-mesh \
   --set dashboard.create=true
 ```
 
-> Open the Chaos Mesh dashboard:
-> ```bash
-> kubectl -n chaos-mesh port-forward svc/chaos-dashboard 2333:2333
-> # browse http://localhost:2333
-> ```
+> Open Chaos Mesh at http://localhost:2333.
