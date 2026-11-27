@@ -13,7 +13,7 @@ Hands-on workshop: run [CloudNativePG](https://cloudnative-pg.io/) on [kind](htt
 | `experiments/` | Chaos experiments (README + YAML per scenario) |
 | `loadgen/` | Go R/W client against `pg-cluster-rw` |
 | `artifacts/` | Offline image/chart cache (`images.txt`, tarballs after `make cache`) |
-| `scripts/` | Tool install, image cache/load, optional Cisco CA for kind |
+| `scripts/` | Tool install, image cache/load helpers |
 
 ## Quick start
 
@@ -55,12 +55,6 @@ make install OFFLINE=1
 ```
 
 Details: [artifacts/README.md](artifacts/README.md). Image list: [artifacts/images.txt](artifacts/images.txt).
-
-If pulls fail with `x509: certificate signed by unknown authority` on a Cisco Secure Access network, after `make kind` run:
-
-```bash
-bash scripts/install-cisco-ca-on-kind.sh
-```
 
 ## What `make install` brings up
 
